@@ -69,6 +69,7 @@ jobs:
         run: echo "TEST_DB_URL=postgres://${{ env.TEST_DB_USER }}:${{ env.TEST_DB_PASS }}@127.0.0.1:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable" >> "$GITHUB_ENV"
 
       - name: Validate migration checksums
+        working-directory: ${{ env.INFRA_DIR }}
         run: atlas migrate diff --dir "file://${{ env.INFRA_DIR }}/migrations" --env local
 
       - name: Lint latest migration
