@@ -61,7 +61,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
       
       - name: Install app dependencies
-        run: uv venv & uv sync "${{ env.APP_DIR }}"
+        run: uv sync
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
