@@ -52,13 +52,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: "Set up Python"
+        uses: actions/setup-python@v6
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version-file: "atlas_fastapi_sample/project.toml"
 
-      - name: Setup uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
       
       - name: Install app dependencies
         run: uv venv & uv sync "${{ env.APP_DIR }}"
