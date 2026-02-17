@@ -159,7 +159,7 @@ jobs:
         uses: ariga/setup-atlas@v0
 
       - name: Install Atlas SQLAlchemy provider
-        run: atlas provider install sqlalchemy
+        run: pip install atlas-provider-sqlalchemy
 
       - name: Download Cloud SQL Auth Proxy
         run: |
