@@ -26,4 +26,10 @@ env "local" {
   migration {
     dir = "file://migrations"
   }
+
+  format {
+        migrate {
+            diff = "{{ sql . \"  \" }}"
+        }
+    }
 }

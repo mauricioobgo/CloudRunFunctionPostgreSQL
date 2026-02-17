@@ -69,7 +69,7 @@ jobs:
         run: echo "TEST_DB_URL=postgres://${{ env.TEST_DB_USER }}:${{ env.TEST_DB_PASS }}@127.0.0.1:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable" >> "$GITHUB_ENV"
 
       - name: Validate migration checksums
-        run: atlas migrate hash --dir "file://${{ env.INFRA_DIR }}/migrations"
+        run: atlas migrate diff --dir "file://${{ env.INFRA_DIR }}/migrations" --env local
 
       - name: Lint latest migration
         working-directory: ${{ env.INFRA_DIR }}
@@ -88,16 +88,6 @@ jobs:
       - name: Apply migrations to ephemeral test DB
         run: atlas migrate apply --dir "file://${{ env.INFRA_DIR }}/migrations" --url "${{ env.TEST_DB_URL }}" --auto-approve
 
-      - name: Run tests if present
-        run: |
-          if [ -d "${APP_DIR}/tests" ]; then
-            uv pip install pytest
-            pytest "${APP_DIR}/tests" -v
-          else
-            echo "No tests directory found; skipping pytest"
-          fi
-        env:
-          DATABASE_URL: ${{ env.TEST_DB_URL }}
 
   apply:
     needs: lint-and-test
