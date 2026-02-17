@@ -81,4 +81,5 @@ jobs:
           atlas migrate diff ensure_sync --env local
 
       - name: Apply migrations to ephemeral test DB
+        working-directory: ${{ env.INFRA_DIR }}
         run: atlas migrate apply --dir "file://${{ env.INFRA_DIR }}/migrations" --url "${{ env.TEST_DB_URL }}" --env local
