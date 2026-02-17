@@ -60,7 +60,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
       
       - name: Install app dependencies
-        run: uv sync --project atlas_fastapi_sample/pyproject.toml
+        run: uv sync --system -e --project atlas_fastapi_sample/pyproject.toml
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
