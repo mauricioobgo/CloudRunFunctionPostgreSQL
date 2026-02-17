@@ -11,7 +11,7 @@ permissions:
 # =========================================================
 env:
   # Application & Infrastructure Paths
-  PYTHON_VERSION: "3.12"
+  PYTHON_VERSION: "3.13"
   APP_DIR: "./atlas_fastapi_sample"
   INFRA_DIR: "./atlas_infra"
   
