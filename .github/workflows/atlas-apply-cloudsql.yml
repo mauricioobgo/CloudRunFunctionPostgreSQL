@@ -1,29 +1,4 @@
-name: Atlas GCP
-
-on:
-  workflow_dispatch:
-    inputs:
-      apply_changes:
-        description: "Apply migrations to Cloud SQL after tests pass"
-        required: true
-        default: false
-        type: boolean
-
-permissions:
-  contents: read
-  id-token: write
-
-env:
-  APP_DIR: ./atlas_fastapi_sample
-  INFRA_DIR: ./atlas_infra
-  PROXY_VERSION: v2.14.3
-  PROXY_HOST: ${{ secrets.INSTANCE_CONNECTION_NAME }}
-  PROXY_PORT: 5432
-  INSTANCE_CONNECTION_NAME: ${{ secrets.INSTANCE_CONNECTION_NAME }}
-  DEV_URL: docker://postgres/16/dev
-
-jobs:
-  lint-and-test:
+lint-and-test:
     runs-on: ubuntu-latest
 
     services:
@@ -51,16 +26,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: "Set up Python"
-        uses: actions/setup-python@v6
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version-file: "atlas_fastapi_sample/pyproject.toml"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v5
       
+      # 🚨 FIX 1: The 'uv' Path Export
       - name: Install app dependencies
-        run: uv sync --system -e --project atlas_fastapi_sample/pyproject.toml
+        run: |
+          uv sync --project atlas_fastapi_sample/pyproject.toml
+          # This forces GitHub Actions to use the uv virtual environment globally
+          # so Atlas can actually find 'sqlmodel' in the next steps!
+          echo "${{ github.workspace }}/atlas_fastapi_sample/.venv/bin" >> $GITHUB_PATH
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
@@ -68,9 +48,22 @@ jobs:
       - name: Build test DB URL
         run: echo "TEST_DB_URL=postgres://${{ env.TEST_DB_USER }}:${{ env.TEST_DB_PASS }}@127.0.0.1:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable" >> "$GITHUB_ENV"
 
-      - name: Validate migration checksums
+      # 🚨 FIX 2: The Strict Drift Enforcement ("--check")
+      - name: Enforce Migration Sync (Check for Drift)
         working-directory: ${{ env.INFRA_DIR }}
-        run: atlas migrate diff --dir "file://${{ env.INFRA_DIR }}/migrations" --env local
+        run: |
+          # 1. Ask Atlas to calculate the diff. 
+          # (If atlas.sum is broken, it will naturally fail here).
+          atlas migrate diff ensure_sync --env local
+          
+          # 2. Check if Atlas had to create a new file in the runner.
+          # If it did, it means the developer forgot to run 'diff' locally!
+          if [ -n "$(git status --porcelain migrations/)" ]; then
+            echo "🚨 ERROR: Schema drift detected!"
+            echo "You modified the Python ORM models but forgot to run 'atlas migrate diff' locally."
+            echo "Please run it locally and commit the generated .sql files."
+            exit 1
+          fi
 
       - name: Lint latest migration
         working-directory: ${{ env.INFRA_DIR }}
@@ -87,66 +80,4 @@ jobs:
           ATLAS_URL: ${{ env.TEST_DB_URL }}
 
       - name: Apply migrations to ephemeral test DB
-        run: atlas migrate apply --dir "file://${{ env.INFRA_DIR }}/migrations" --url "${{ env.TEST_DB_URL }}" --auto-approve
-
-
-  apply:
-    needs: lint-and-test
-    if: ${{ inputs.apply_changes }}
-    runs-on: ubuntu-latest
-    environment: production
-
-    env:
-      DB_USER: ${{ secrets.DB_USER }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      DB_NAME: ${{ secrets.DB_NAME }}
-      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ env.GCP_SA_KEY }}
-
-      - name: "Set up Python"
-        uses: actions/setup-python@v6
-        with:
-          python-version-file: "atlas_fastapi_sample/pyproject.toml"
-
-      - name: Setup uv
-        run: curl -LsSf https://astral.sh/uv/install.sh | sh
-
-      - name: Install app dependencies
-        run: uv pip install -e "${{ env.APP_DIR }}"
-
-      - name: Setup Atlas CLI
-        uses: ariga/setup-atlas@v0
-      
-      - name: Build DB URL
-        run: echo "DB_URL=postgres://${{ env.DB_USER }}:${{ env.DB_PASSWORD }}@${{ env.PROXY_HOST }}:${{ env.PROXY_PORT }}/${{ env.DB_NAME }}?sslmode=disable" >> "$GITHUB_ENV"
-
-      - name: Download Cloud SQL Auth Proxy
-        run: |
-          curl -sSLo cloud-sql-proxy "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/${PROXY_VERSION}/cloud-sql-proxy.linux.amd64"
-          chmod +x cloud-sql-proxy
-
-      - name: Start Cloud SQL Auth Proxy
-        run: |
-          ./cloud-sql-proxy --address "$PROXY_HOST" --port "$PROXY_PORT" "$INSTANCE_CONNECTION_NAME" > proxy.log 2>&1 &
-          for i in {1..20}; do
-            nc -z "$PROXY_HOST" "$PROXY_PORT" && exit 0
-            sleep 1
-          done
-          echo "Cloud SQL proxy failed to start"
-          cat proxy.log
-          exit 1
-
-      - name: Apply Atlas migrations to Cloud SQL
-        working-directory: ${{ env.INFRA_DIR }}
-        run: atlas migrate apply --env local --auto-approve
-        env:
-          ATLAS_URL: ${{ env.DB_URL }}
-          ATLAS_DEV_URL: ${{ env.DEV_URL }}
+        run: atlas migrate apply --dir "file://${{ env.INFRA_DIR }}/migrations" --url "${{ env.TEST_DB_URL }}" --auto-approve --env local
