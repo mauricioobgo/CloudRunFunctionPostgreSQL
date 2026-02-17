@@ -29,14 +29,14 @@ env:
   PROXY_PORT: "5432"
   
   # Set this in GitHub (Settings > Environments > Variables) or let it use the fallback
-  INSTANCE_CONNECTION_NAME: ${{ vars.INSTANCE_CONNECTION_NAME || 'testing-atlas-setup:us-east4:atlas-instance-test' }}
+  INSTANCE_CONNECTION_NAME: ${{ secrets.INSTANCE_CONNECTION_NAME || 'testing-atlas-setup:us-east4:atlas-instance-test' }}
 
   # Ephemeral CI Database Config
   # Set these in GitHub Variables/Secrets, or it will safely default for the throwaway container
-  TEST_DB_USER: ${{ vars.TEST_DB_USER || 'postgres' }}
+  TEST_DB_USER: ${{ secrets.TEST_DB_USER || 'postgres' }}
   TEST_DB_PASS: ${{ secrets.TEST_DB_PASS || 'password' }}
-  TEST_DB_NAME: ${{ vars.TEST_DB_NAME || 'test_db' }}
-  TEST_DB_PORT: ${{ vars.TEST_DB_PORT || '5432' }}
+  TEST_DB_NAME: ${{ secrets.TEST_DB_NAME || 'test_db' }}
+  TEST_DB_PORT: ${{ secrets.TEST_DB_PORT || '5432' }}
 
 jobs:
   # =========================================================
