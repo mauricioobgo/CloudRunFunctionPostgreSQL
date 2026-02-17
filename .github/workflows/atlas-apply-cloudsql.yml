@@ -14,7 +14,6 @@ permissions:
   id-token: write
 
 env:
-  PYTHON_VERSION: "3.13"
   APP_DIR: ./atlas_fastapi_sample
   INFRA_DIR: ./atlas_infra
   PROXY_VERSION: v2.14.3
@@ -55,13 +54,13 @@ jobs:
       - name: "Set up Python"
         uses: actions/setup-python@v6
         with:
-          python-version-file: "atlas_fastapi_sample/project.toml"
+          python-version-file: "atlas_fastapi_sample/pyproject.toml"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       
       - name: Install app dependencies
-        run: uv sync
+        run: uv sync --project atlas_fastapi_sample/pyproject.toml
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
@@ -121,10 +120,10 @@ jobs:
         with:
           credentials_json: ${{ env.GCP_SA_KEY }}
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: "Set up Python"
+        uses: actions/setup-python@v6
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version-file: "atlas_fastapi_sample/pyproject.toml"
 
       - name: Setup uv
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
