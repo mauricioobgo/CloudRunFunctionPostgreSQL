@@ -2,8 +2,10 @@
 CREATE TABLE "users" (
   "email" character varying(255) NOT NULL,
   "full_name" character varying(255) NOT NULL,
+  "name_suffix" character varying NOT NULL,
   "id" serial NOT NULL,
   "created_at" timestamp NOT NULL,
+  "insert_time_stamp" timestamp NOT NULL,
   PRIMARY KEY ("id")
 );
 -- Create index "ix_users_email" to table: "users"
@@ -14,6 +16,7 @@ CREATE TABLE "posts" (
   "body" character varying NOT NULL,
   "id" serial NOT NULL,
   "owner_id" integer NOT NULL,
+  "post_name" character varying NOT NULL,
   "created_at" timestamp NOT NULL,
   PRIMARY KEY ("id"),
   CONSTRAINT "posts_owner_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users" ("id") ON UPDATE NO ACTION ON DELETE NO ACTION
