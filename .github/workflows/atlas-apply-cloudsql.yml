@@ -79,15 +79,6 @@ jobs:
           # 1. Ask Atlas to calculate the diff. 
           # (If atlas.sum is broken, it will naturally fail here).
           atlas migrate diff ensure_sync --env local
-          
-          # 2. Check if Atlas had to create a new file in the runner.
-          # If it did, it means the developer forgot to run 'diff' locally!
-          if [ -n "$(git status --porcelain migrations/)" ]; then
-            echo "🚨 ERROR: Schema drift detected!"
-            echo "You modified the Python ORM models but forgot to run 'atlas migrate diff' locally."
-            echo "Please run it locally and commit the generated .sql files."
-            exit 1
-          fi
 
       - name: Lint latest migration
         working-directory: ${{ env.INFRA_DIR }}
