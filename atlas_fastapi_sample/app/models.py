@@ -8,6 +8,7 @@ from sqlmodel import Field, Relationship, SQLModel
 class UserBase(SQLModel):
     email: str = Field(index=True, unique=True, max_length=255)
     full_name: str = Field(max_length=255)
+    name_suffix: str
 
 
 class User(UserBase, table=True):
@@ -15,8 +16,8 @@ class User(UserBase, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), nullable=False)
-    insert_time_stamp: datetime = Field(default=None)
     posts: list["Post"] = Relationship(back_populates="owner")
+    address: str = Field(default=None)
 
 
 class UserCreate(UserBase):
