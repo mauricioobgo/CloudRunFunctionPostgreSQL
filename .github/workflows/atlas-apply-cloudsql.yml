@@ -1,14 +1,6 @@
 name: Atlas Apply Cloud SQL
 
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - master
-    paths:
-      - "atlas_fastapi_sample/**"
-      - "atlas_infra/**"
-      - ".github/workflows/atlas-apply-cloudsql.yml"
+on: workflow_dispatch
 
 permissions:
   contents: read
@@ -54,7 +46,7 @@ jobs:
           POSTGRES_PASSWORD: ${{ env.TEST_DB_PASS }}
           POSTGRES_DB: ${{ env.TEST_DB_NAME }}
         ports:
-          - ${{ env.TEST_DB_PORT }}:5432
+          - '5432'
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
