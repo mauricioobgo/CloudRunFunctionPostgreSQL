@@ -14,17 +14,14 @@ permissions:
   id-token: write
 
 env:
-  PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
-  APP_DIR: ${{ vars.APP_DIR }}
-  INFRA_DIR: ${{ vars.INFRA_DIR }}
-  PROXY_VERSION: ${{ vars.PROXY_VERSION }}
-  PROXY_HOST: ${{ vars.PROXY_HOST }}
-  PROXY_PORT: ${{ vars.PROXY_PORT }}
+  PYTHON_VERSION: "3.13"
+  APP_DIR: ./atlas_fastapi_sample
+  INFRA_DIR: ./atlas_infra
+  PROXY_VERSION: v2.14.3
+  PROXY_HOST: 127.0.0.1
+  PROXY_PORT: 5432
   INSTANCE_CONNECTION_NAME: ${{ vars.INSTANCE_CONNECTION_NAME }}
-  TEST_DB_USER: ${{ vars.TEST_DB_USER }}
-  TEST_DB_NAME: ${{ vars.TEST_DB_NAME }}
-  TEST_DB_PORT: ${{ vars.TEST_DB_PORT }}
-  DEV_URL: ${{ vars.DEV_URL }}
+  DEV_URL: docker://postgres/16/dev
 
 jobs:
   lint-and-test:
@@ -46,43 +43,29 @@ jobs:
           --health-retries=5
 
     env:
-      TEST_DB_PASS: pass
+      TEST_DB_USER: postgres
+      TEST_DB_NAME: app_db
+      TEST_DB_PASS: postgres
+      TEST_DB_PORT: 5432
+      TEST_DB_URL: postgres://${{ env.TEST_DB_USER }}:${{ env.TEST_DB_PASS }}@127.0.0.1:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Resolve defaults
-        run: |
-          echo "PYTHON_VERSION=${PYTHON_VERSION:-3.13}" >> "$GITHUB_ENV"
-          echo "APP_DIR=${APP_DIR:-./atlas_fastapi_sample}" >> "$GITHUB_ENV"
-          echo "INFRA_DIR=${INFRA_DIR:-./atlas_infra}" >> "$GITHUB_ENV"
-          echo "PROXY_VERSION=${PROXY_VERSION:-v2.14.3}" >> "$GITHUB_ENV"
-          echo "PROXY_HOST=${PROXY_HOST:-127.0.0.1}" >> "$GITHUB_ENV"
-          echo "PROXY_PORT=${PROXY_PORT:-5432}" >> "$GITHUB_ENV"
-          echo "TEST_DB_USER=${TEST_DB_USER:-postgres}" >> "$GITHUB_ENV"
-          echo "TEST_DB_NAME=${TEST_DB_NAME:-app_db}" >> "$GITHUB_ENV"
-          echo "TEST_DB_PORT=${TEST_DB_PORT:-5432}" >> "$GITHUB_ENV"
-          echo "DEV_URL=${DEV_URL:-docker://postgres/16/dev}" >> "$GITHUB_ENV"
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Setup uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      
       - name: Install app dependencies
-        run: pip install -e "${{ env.APP_DIR }}"
+        run: uv sync "${{ env.APP_DIR }}"
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
-
-      - name: Install Atlas SQLAlchemy provider
-        run: atlas provider install sqlalchemy
-
-      - name: Build test DB URL
-        run: |
-          PASS="${TEST_DB_PASS:-postgres}"
-          echo "TEST_DB_URL=postgres://${TEST_DB_USER}:${PASS}@127.0.0.1:${TEST_DB_PORT}/${TEST_DB_NAME}?search_path=app&sslmode=disable" >> "$GITHUB_ENV"
 
       - name: Validate migration checksums
         run: atlas migrate hash --dir "file://${{ env.INFRA_DIR }}/migrations"
@@ -98,16 +81,16 @@ jobs:
           fi
           atlas migrate lint --env local --latest 1
         env:
-          DB_URL: ${{ env.TEST_DB_URL }}
-          DEV_URL: ${{ env.DEV_URL }}
+          ATLAS_DEV_URL: ${{ env.DEV_URL }}
+          ATLAS_URL: ${{ env.TEST_DB_URL }}
 
       - name: Apply migrations to ephemeral test DB
-        run: atlas migrate apply --url "${{ env.TEST_DB_URL }}" --dir "file://${{ env.INFRA_DIR }}/migrations" --auto-approve
+        run: atlas migrate apply --dir "file://${{ env.INFRA_DIR }}/migrations" --url "${{ env.TEST_DB_URL }}" --auto-approve
 
       - name: Run tests if present
         run: |
           if [ -d "${APP_DIR}/tests" ]; then
-            pip install pytest
+            uv pip install pytest
             pytest "${APP_DIR}/tests" -v
           else
             echo "No tests directory found; skipping pytest"
@@ -122,25 +105,12 @@ jobs:
     environment: production
 
     env:
-      DB_USER: ${{ secrets.DB_USER }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_URL: postgres://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@${{ env.PROXY_HOST }}:${{ env.PROXY_PORT }}/${{ secrets.DB_NAME }}?sslmode=disable
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Resolve defaults
-        run: |
-          echo "PYTHON_VERSION=${PYTHON_VERSION:-3.13}" >> "$GITHUB_ENV"
-          echo "APP_DIR=${APP_DIR:-./atlas_fastapi_sample}" >> "$GITHUB_ENV"
-          echo "INFRA_DIR=${INFRA_DIR:-./atlas_infra}" >> "$GITHUB_ENV"
-          echo "PROXY_VERSION=${PROXY_VERSION:-v2.14.3}" >> "$GITHUB_ENV"
-          echo "PROXY_HOST=${PROXY_HOST:-127.0.0.1}" >> "$GITHUB_ENV"
-          echo "PROXY_PORT=${PROXY_PORT:-5432}" >> "$GITHUB_ENV"
-          echo "INSTANCE_CONNECTION_NAME=${INSTANCE_CONNECTION_NAME:-testing-atlas-setup:us-east4:atlas-instance-test}" >> "$GITHUB_ENV"
-          echo "DEV_URL=${DEV_URL:-docker://postgres/16/dev}" >> "$GITHUB_ENV"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
@@ -152,14 +122,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
+      - name: Setup uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
       - name: Install app dependencies
-        run: pip install -e "${{ env.APP_DIR }}"
+        run: uv pip install -e "${{ env.APP_DIR }}"
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
-
-      - name: Install Atlas SQLAlchemy provider
-        run: pip install atlas-provider-sqlalchemy
 
       - name: Download Cloud SQL Auth Proxy
         run: |
@@ -179,7 +149,7 @@ jobs:
 
       - name: Apply Atlas migrations to Cloud SQL
         working-directory: ${{ env.INFRA_DIR }}
-        env:
-          DB_URL: postgres://${{ env.DB_USER }}:${{ env.DB_PASSWORD }}@${{ env.PROXY_HOST }}:${{ env.PROXY_PORT }}/${{ env.DB_NAME }}?search_path=app&sslmode=disable
-          DEV_URL: ${{ env.DEV_URL }}
         run: atlas migrate apply --env local --auto-approve
+        env:
+          ATLAS_URL: ${{ env.DB_URL }}
+          ATLAS_DEV_URL: ${{ env.DEV_URL }}
