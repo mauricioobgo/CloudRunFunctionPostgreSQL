@@ -1,0 +1,62 @@
+name: Atlas CI
+
+on:
+  pull_request:
+    paths:
+      - "atlas_fastapi_sample/**"
+      - "atlas_infra/**"
+      - ".github/workflows/atlas-ci.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    env:
+      DB_URL: postgres://postgres:postgres@127.0.0.1:5432/app_db?search_path=app&sslmode=disable
+      DEV_URL: docker://postgres/16/dev?search_path=app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install FastAPI app dependencies
+        run: pip install -e ./atlas_fastapi_sample
+
+      - name: Setup Atlas CLI
+        uses: ariga/setup-atlas@v0
+
+      - name: Install Atlas SQLAlchemy provider
+        run: atlas provider install sqlalchemy
+
+      - name: Verify migration checksums
+        run: atlas migrate hash --dir "file://atlas_infra/migrations"
+
+      - name: Lint latest migration
+        run: |
+          shopt -s nullglob
+          files=(atlas_infra/migrations/*.sql)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No SQL migrations found; skipping lint"
+            exit 0
+          fi
+          atlas migrate lint --config "file://atlas_infra/atlas.hcl" --env local --latest 1

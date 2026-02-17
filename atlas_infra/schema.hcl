@@ -1,0 +1,3 @@
+# schema.hcl
+schema "app" {
+}
