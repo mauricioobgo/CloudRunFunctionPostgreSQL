@@ -71,7 +71,7 @@ jobs:
         uses: ariga/setup-atlas@v0
       
       - name: Build test DB URL
-        run: echo "TEST_DB_URL=postgres://${{ env.TEST_DB_USER }}:${{ env.TEST_DB_PASS }}@127.0.0.1:5432/dev?search_path=public&sslmode=disable" >> "$GITHUB_ENV"
+        run: echo "TEST_DB_URL=docker://postgres/16/dev?search_path=public&sslmode=disable" >> "$GITHUB_ENV"
 
       - name: Enforce Migration Sync (Check for Drift)
         working-directory: ${{ env.INFRA_DIR }}
