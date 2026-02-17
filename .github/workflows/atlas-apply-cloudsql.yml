@@ -18,9 +18,9 @@ env:
   APP_DIR: ./atlas_fastapi_sample
   INFRA_DIR: ./atlas_infra
   PROXY_VERSION: v2.14.3
-  PROXY_HOST: ${{ vars.INSTANCE_CONNECTION_NAME }}
+  PROXY_HOST: ${{ secrets.INSTANCE_CONNECTION_NAME }}
   PROXY_PORT: 5432
-  INSTANCE_CONNECTION_NAME: ${{ vars.INSTANCE_CONNECTION_NAME }}
+  INSTANCE_CONNECTION_NAME: ${{ secrets.INSTANCE_CONNECTION_NAME }}
   DEV_URL: docker://postgres/16/dev
 
 jobs:
@@ -61,7 +61,7 @@ jobs:
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       
       - name: Install app dependencies
-        run: uv pip install -e "${{ env.APP_DIR }}"
+        run: uv venv & uv sync "${{ env.APP_DIR }}"
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
