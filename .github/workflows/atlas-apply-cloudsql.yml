@@ -18,7 +18,7 @@ env:
   APP_DIR: ./atlas_fastapi_sample
   INFRA_DIR: ./atlas_infra
   PROXY_VERSION: v2.14.3
-  PROXY_HOST: 127.0.0.1
+  PROXY_HOST: ${{ vars.INSTANCE_CONNECTION_NAME }}
   PROXY_PORT: 5432
   INSTANCE_CONNECTION_NAME: ${{ vars.INSTANCE_CONNECTION_NAME }}
   DEV_URL: docker://postgres/16/dev
@@ -47,7 +47,6 @@ jobs:
       TEST_DB_NAME: app_db
       TEST_DB_PASS: postgres
       TEST_DB_PORT: 5432
-      TEST_DB_URL: postgres://${{ env.TEST_DB_USER }}:${{ env.TEST_DB_PASS }}@127.0.0.1:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable
 
     steps:
       - name: Checkout
@@ -62,10 +61,13 @@ jobs:
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
       
       - name: Install app dependencies
-        run: uv sync "${{ env.APP_DIR }}"
+        run: uv pip install -e "${{ env.APP_DIR }}"
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
+      
+      - name: Build test DB URL
+        run: echo "TEST_DB_URL=postgres://${{ env.TEST_DB_USER }}:${{ env.TEST_DB_PASS }}@127.0.0.1:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable" >> "$GITHUB_ENV"
 
       - name: Validate migration checksums
         run: atlas migrate hash --dir "file://${{ env.INFRA_DIR }}/migrations"
@@ -105,7 +107,9 @@ jobs:
     environment: production
 
     env:
-      DB_URL: postgres://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@${{ env.PROXY_HOST }}:${{ env.PROXY_PORT }}/${{ secrets.DB_NAME }}?sslmode=disable
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_NAME: ${{ secrets.DB_NAME }}
       GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
 
     steps:
@@ -130,6 +134,9 @@ jobs:
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
+      
+      - name: Build DB URL
+        run: echo "DB_URL=postgres://${{ env.DB_USER }}:${{ env.DB_PASSWORD }}@${{ env.PROXY_HOST }}:${{ env.PROXY_PORT }}/${{ env.DB_NAME }}?sslmode=disable" >> "$GITHUB_ENV"
 
       - name: Download Cloud SQL Auth Proxy
         run: |
