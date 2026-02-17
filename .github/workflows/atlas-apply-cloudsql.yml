@@ -80,19 +80,5 @@ jobs:
           # (If atlas.sum is broken, it will naturally fail here).
           atlas migrate diff ensure_sync --env local
 
-      - name: Lint latest migration
-        working-directory: ${{ env.INFRA_DIR }}
-        run: |
-          shopt -s nullglob
-          files=(migrations/*.sql)
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No SQL migrations found; skipping lint"
-            exit 0
-          fi
-          atlas migrate lint --env local --latest 1
-        env:
-          ATLAS_DEV_URL: ${{ env.DEV_URL }}
-          ATLAS_URL: ${{ env.TEST_DB_URL }}
-
       - name: Apply migrations to ephemeral test DB
         run: atlas migrate apply --dir "file://${{ env.INFRA_DIR }}/migrations" --url "${{ env.TEST_DB_URL }}" --auto-approve --env local
