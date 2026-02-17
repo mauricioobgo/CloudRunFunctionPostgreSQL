@@ -1,4 +1,4 @@
-name: Atlas Apply Cloud SQL
+name: Atlas GCP
 
 on: workflow_dispatch
 
