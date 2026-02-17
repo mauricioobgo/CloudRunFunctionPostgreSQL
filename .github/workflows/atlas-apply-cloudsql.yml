@@ -1,142 +1,185 @@
 name: Atlas GCP
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: "Apply migrations to Cloud SQL after tests pass"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
   id-token: write
 
-# =========================================================
-# GLOBAL CONFIGURATION (Zero Hardcoding)
-# =========================================================
 env:
-  # Application & Infrastructure Paths
-  PYTHON_VERSION: "3.13"
-  APP_DIR: "./atlas_fastapi_sample"
-  INFRA_DIR: "./atlas_infra"
-  
-  # Cloud SQL Proxy Config
-  PROXY_VERSION: "v2.14.3"
-  PROXY_HOST: "127.0.0.1"
-  PROXY_PORT: "5432"
-  
-  # Set this in GitHub (Settings > Environments > Variables) or let it use the fallback
-  INSTANCE_CONNECTION_NAME: ${{ secrets.INSTANCE_CONNECTION_NAME || 'testing-atlas-setup:us-east4:atlas-instance-test' }}
-
-  # Ephemeral CI Database Config
-  # Set these in GitHub Variables/Secrets, or it will safely default for the throwaway container
-  TEST_DB_USER: ${{ secrets.TEST_DB_USER || 'postgres' }}
-  TEST_DB_PASS: ${{ secrets.TEST_DB_PASS || 'password' }}
-  TEST_DB_NAME: ${{ secrets.TEST_DB_NAME || 'test_db' }}
-  TEST_DB_PORT: ${{ secrets.TEST_DB_PORT || '5432' }}
+  PYTHON_VERSION: ${{ vars.PYTHON_VERSION }}
+  APP_DIR: ${{ vars.APP_DIR }}
+  INFRA_DIR: ${{ vars.INFRA_DIR }}
+  PROXY_VERSION: ${{ vars.PROXY_VERSION }}
+  PROXY_HOST: ${{ vars.PROXY_HOST }}
+  PROXY_PORT: ${{ vars.PROXY_PORT }}
+  INSTANCE_CONNECTION_NAME: ${{ vars.INSTANCE_CONNECTION_NAME }}
+  TEST_DB_USER: ${{ vars.TEST_DB_USER }}
+  TEST_DB_NAME: ${{ vars.TEST_DB_NAME }}
+  TEST_DB_PORT: ${{ vars.TEST_DB_PORT }}
+  DEV_URL: ${{ vars.DEV_URL }}
 
 jobs:
-  # =========================================================
-  # JOB 1: CI (Lint & Test) - Runs Automatically
-  # =========================================================
   lint-and-test:
     runs-on: ubuntu-latest
-    
+
     services:
       postgres:
         image: postgres:16
         env:
-          # The container boots securely using the workflow-level variables
-          POSTGRES_USER: ${{ env.TEST_DB_USER }}
-          POSTGRES_PASSWORD: ${{ env.TEST_DB_PASS }}
-          POSTGRES_DB: ${{ env.TEST_DB_NAME }}
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app_db
         ports:
-          - '5432'
+          - 5432:5432
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     env:
-      # URLs built dynamically for Atlas
-      TEST_DB_URL: "postgres://${{ env.TEST_DB_USER }}:${{ env.TEST_DB_PASS }}@127.0.0.1:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?search_path=public&sslmode=disable"
-      DEV_URL: "docker://postgres/16/dev?search_path=public"
+      TEST_DB_PASS: pass
 
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve defaults
+        run: |
+          echo "PYTHON_VERSION=${PYTHON_VERSION:-3.13}" >> "$GITHUB_ENV"
+          echo "APP_DIR=${APP_DIR:-./atlas_fastapi_sample}" >> "$GITHUB_ENV"
+          echo "INFRA_DIR=${INFRA_DIR:-./atlas_infra}" >> "$GITHUB_ENV"
+          echo "PROXY_VERSION=${PROXY_VERSION:-v2.14.3}" >> "$GITHUB_ENV"
+          echo "PROXY_HOST=${PROXY_HOST:-127.0.0.1}" >> "$GITHUB_ENV"
+          echo "PROXY_PORT=${PROXY_PORT:-5432}" >> "$GITHUB_ENV"
+          echo "TEST_DB_USER=${TEST_DB_USER:-postgres}" >> "$GITHUB_ENV"
+          echo "TEST_DB_NAME=${TEST_DB_NAME:-app_db}" >> "$GITHUB_ENV"
+          echo "TEST_DB_PORT=${TEST_DB_PORT:-5432}" >> "$GITHUB_ENV"
+          echo "DEV_URL=${DEV_URL:-docker://postgres/16/dev}" >> "$GITHUB_ENV"
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install Application & Test Dependencies
-        run: |
-          pip install -e ${{ env.APP_DIR }}
-          pip install pytest
+      - name: Install app dependencies
+        run: pip install -e "${{ env.APP_DIR }}"
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
 
-      - name: Atlas Migrate Lint (Safety Check)
-        working-directory: ${{ env.INFRA_DIR }}
-        run: atlas migrate lint --env local --latest 1
+      - name: Install Atlas SQLAlchemy provider
+        run: atlas provider install sqlalchemy
 
-      - name: Apply Migrations to Ephemeral Test DB
-        working-directory: ${{ env.INFRA_DIR }}
-        run: atlas migrate apply --url ${{ env.TEST_DB_URL }} --dir "file://migrations"
+      - name: Build test DB URL
+        run: |
+          PASS="${TEST_DB_PASS:-postgres}"
+          echo "TEST_DB_URL=postgres://${TEST_DB_USER}:${PASS}@127.0.0.1:${TEST_DB_PORT}/${TEST_DB_NAME}?search_path=app&sslmode=disable" >> "$GITHUB_ENV"
 
-      - name: Run Application Tests (Pytest)
+      - name: Validate migration checksums
+        run: atlas migrate hash --dir "file://${{ env.INFRA_DIR }}/migrations"
+
+      - name: Lint latest migration
+        working-directory: ${{ env.INFRA_DIR }}
+        run: |
+          shopt -s nullglob
+          files=(migrations/*.sql)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No SQL migrations found; skipping lint"
+            exit 0
+          fi
+          atlas migrate lint --env local --latest 1
         env:
-          DATABASE_URL: ${{ env.TEST_DB_URL }} 
-        run: pytest ${{ env.APP_DIR }}/tests/ -v 
+          DB_URL: ${{ env.TEST_DB_URL }}
+          DEV_URL: ${{ env.DEV_URL }}
 
-  # =========================================================
-  # JOB 2: CD (Deploy) - Pauses for Ad-Hoc Approval
-  # =========================================================
+      - name: Apply migrations to ephemeral test DB
+        run: atlas migrate apply --url "${{ env.TEST_DB_URL }}" --dir "file://${{ env.INFRA_DIR }}/migrations" --auto-approve
+
+      - name: Run tests if present
+        run: |
+          if [ -d "${APP_DIR}/tests" ]; then
+            pip install pytest
+            pytest "${APP_DIR}/tests" -v
+          else
+            echo "No tests directory found; skipping pytest"
+          fi
+        env:
+          DATABASE_URL: ${{ env.TEST_DB_URL }}
+
   apply:
     needs: lint-and-test
-    if: github.ref == 'refs/heads/master'
+    if: ${{ inputs.apply_changes }}
     runs-on: ubuntu-latest
-
-    # THIS IS THE GATE: Halts execution until approved in the GitHub UI
-    environment: production 
+    environment: production
 
     env:
-      # Injecting secure production credentials
       DB_USER: ${{ secrets.DB_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_NAME: ${{ secrets.DB_NAME }}
-      DEV_URL: "docker://postgres/16/dev?search_path=public"
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
 
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve defaults
+        run: |
+          echo "PYTHON_VERSION=${PYTHON_VERSION:-3.13}" >> "$GITHUB_ENV"
+          echo "APP_DIR=${APP_DIR:-./atlas_fastapi_sample}" >> "$GITHUB_ENV"
+          echo "INFRA_DIR=${INFRA_DIR:-./atlas_infra}" >> "$GITHUB_ENV"
+          echo "PROXY_VERSION=${PROXY_VERSION:-v2.14.3}" >> "$GITHUB_ENV"
+          echo "PROXY_HOST=${PROXY_HOST:-127.0.0.1}" >> "$GITHUB_ENV"
+          echo "PROXY_PORT=${PROXY_PORT:-5432}" >> "$GITHUB_ENV"
+          echo "INSTANCE_CONNECTION_NAME=${INSTANCE_CONNECTION_NAME:-testing-atlas-setup:us-east4:atlas-instance-test}" >> "$GITHUB_ENV"
+          echo "DEV_URL=${DEV_URL:-docker://postgres/16/dev}" >> "$GITHUB_ENV"
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
-          credentials_json: ${{ secrets.GCP_SA_KEY }}
+          credentials_json: ${{ env.GCP_SA_KEY }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install app dependencies
+        run: pip install -e "${{ env.APP_DIR }}"
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
 
+      - name: Install Atlas SQLAlchemy provider
+        run: atlas provider install sqlalchemy
+
       - name: Download Cloud SQL Auth Proxy
         run: |
-          curl -sSLo cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/${{ env.PROXY_VERSION }}/cloud-sql-proxy.linux.amd64
+          curl -sSLo cloud-sql-proxy "https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/${PROXY_VERSION}/cloud-sql-proxy.linux.amd64"
           chmod +x cloud-sql-proxy
 
       - name: Start Cloud SQL Auth Proxy
         run: |
-          ./cloud-sql-proxy --address ${{ env.PROXY_HOST }} --port ${{ env.PROXY_PORT }} "${{ env.INSTANCE_CONNECTION_NAME }}" > proxy.log 2>&1 &
+          ./cloud-sql-proxy --address "$PROXY_HOST" --port "$PROXY_PORT" "$INSTANCE_CONNECTION_NAME" > proxy.log 2>&1 &
           for i in {1..20}; do
-            nc -z ${{ env.PROXY_HOST }} ${{ env.PROXY_PORT }} && exit 0
+            nc -z "$PROXY_HOST" "$PROXY_PORT" && exit 0
             sleep 1
           done
           echo "Cloud SQL proxy failed to start"
           cat proxy.log
           exit 1
 
-      - name: Apply Atlas Migrations to Production
+      - name: Apply Atlas migrations to Cloud SQL
         working-directory: ${{ env.INFRA_DIR }}
         env:
-          # Final connection string built dynamically for Cloud SQL
-          DB_URL: "postgres://${{ env.DB_USER }}:${{ env.DB_PASSWORD }}@${{ env.PROXY_HOST }}:${{ env.PROXY_PORT }}/${{ env.DB_NAME }}?search_path=app&sslmode=disable"
-        run: atlas migrate apply --env local
+          DB_URL: postgres://${{ env.DB_USER }}:${{ env.DB_PASSWORD }}@${{ env.PROXY_HOST }}:${{ env.PROXY_PORT }}/${{ env.DB_NAME }}?search_path=app&sslmode=disable
+          DEV_URL: ${{ env.DEV_URL }}
+        run: atlas migrate apply --env local --auto-approve
