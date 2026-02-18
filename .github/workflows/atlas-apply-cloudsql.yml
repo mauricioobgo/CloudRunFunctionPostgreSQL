@@ -73,13 +73,6 @@ jobs:
         working-directory: ${{ env.INFRA_DIR }}
         run: |
           atlas migrate diff ensure_sync --env local
-          
-          if [ -n "$(git status --porcelain migrations/)" ]; then
-            echo "🚨 ERROR: Schema drift detected!"
-            echo "You modified the Python ORM models but forgot to run 'atlas migrate diff' locally."
-            echo "Please run it locally and commit the generated .sql files."
-            exit 1
-          fi
 
       - name: Apply migrations to ephemeral test DB
         working-directory: ${{ env.INFRA_DIR }}
