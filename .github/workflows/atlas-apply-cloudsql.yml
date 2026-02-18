@@ -11,7 +11,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   APP_DIR: ./atlas_fastapi_sample
@@ -20,12 +19,14 @@ env:
   PROXY_HOST: ${{ secrets.INSTANCE_CONNECTION_NAME }}
   PROXY_PORT: 5432
   INSTANCE_CONNECTION_NAME: ${{ secrets.INSTANCE_CONNECTION_NAME }}
+  # Atlas can still safely use the docker driver for its internal 'dev' database to calculate diffs
   DEV_URL: docker://postgres/16/dev
 
 jobs:
-  lint-and-test:
+  test-and-deploy:
     runs-on: ubuntu-latest
 
+    # This spins up the Postgres container to test the migrations locally
     services:
       postgres:
         image: postgres:16
@@ -43,7 +44,7 @@ jobs:
 
     env:
       TEST_DB_USER: postgres
-      TEST_DB_NAME: dev
+      TEST_DB_NAME: app_db
       TEST_DB_PASS: postgres
       TEST_DB_PORT: 5432
 
@@ -59,27 +60,53 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
       
-      # 🚨 FIX 1: The 'uv' Path Export
       - name: Install app dependencies
         run: |
           uv sync --project atlas_fastapi_sample/pyproject.toml
-          # This forces GitHub Actions to use the uv virtual environment globally
-          # so Atlas can actually find 'sqlmodel' in the next steps!
           echo "${{ github.workspace }}/atlas_fastapi_sample/.venv/bin" >> $GITHUB_PATH
 
       - name: Setup Atlas CLI
         uses: ariga/setup-atlas@v0
       
       - name: Build test DB URL
-        run: echo "TEST_DB_URL=docker://postgres/16/dev?search_path=public&sslmode=disable" >> "$GITHUB_ENV"
+        run: echo "TEST_DB_URL=postgres://${{ env.TEST_DB_USER }}:${{ env.TEST_DB_PASS }}@127.0.0.1:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable" >> "$GITHUB_ENV"
 
       - name: Enforce Migration Sync (Check for Drift)
         working-directory: ${{ env.INFRA_DIR }}
         run: |
-          # 1. Ask Atlas to calculate the diff. 
-          # (If atlas.sum is broken, it will naturally fail here).
           atlas migrate diff ensure_sync --env local
+          
+          if [ -n "$(git status --porcelain migrations/)" ]; then
+            echo "🚨 ERROR: Schema drift detected!"
+            echo "You modified the Python ORM models but forgot to run 'atlas migrate diff' locally."
+            echo "Please run it locally and commit the generated .sql files."
+            exit 1
+          fi
 
       - name: Apply migrations to ephemeral test DB
         working-directory: ${{ env.INFRA_DIR }}
-        run: atlas migrate apply -u "${{ env.TEST_DB_URL }}" --env local
+        run: atlas migrate apply --url "${{ env.TEST_DB_URL }}" --env local
+
+      # --- CLOUD SQL DEPLOYMENT (Only runs if input is true) ---
+      
+      # Authenticate using your Service Account JSON Key stored in GitHub Secrets
+      - name: Authenticate to GCP
+        if: ${{ github.event.inputs.apply_changes == 'true' }}
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Start Cloud SQL Auth Proxy
+        if: ${{ github.event.inputs.apply_changes == 'true' }}
+        uses: GoogleCloudPlatform/cloud-sql-proxy-action@v1.33.0
+        with:
+          version: ${{ env.PROXY_VERSION }}
+          instances: ${{ env.INSTANCE_CONNECTION_NAME }}=tcp:${{ env.PROXY_PORT }}
+
+      - name: Apply migrations to Cloud SQL
+        if: ${{ github.event.inputs.apply_changes == 'true' }}
+        working-directory: ${{ env.INFRA_DIR }}
+        run: |
+          atlas migrate apply \
+            --url "postgres://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@127.0.0.1:${{ env.PROXY_PORT }}/${{ secrets.DB_NAME }}?sslmode=disable" \
+            --env local
